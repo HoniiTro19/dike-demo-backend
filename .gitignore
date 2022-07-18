@@ -9,9 +9,9 @@
 /coverage
 
 # production
-/build
-/bin
-/views
+#/bin
+#/build
+#/views
 
 # misc
 .DS_Store
