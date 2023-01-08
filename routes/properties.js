@@ -3,41 +3,72 @@ const fs = require('fs');
 const path = require('path');
 const util = require('util');
 const exec = util.promisify(require('child_process').exec);
-const enqueue = require('../taskqueue');
+const {enqueue, dequeue} = require('../taskqueue');
 const router = express.Router();
 
-/* TODO turn this async function into actual run benchmark scripts and complete result.csv and error.out copy*/
-async function lsWithGrep() {
+async function runBenchmark(propsFile, resultDir) {
+    // resolve path, propsFile: front-end properties file, resultDir: Dike output directory
+    const dikeDir = path.resolve('../Dike');
+    const runDir = path.join(dikeDir, 'run');
+    const resultCSV = path.join(runDir, resultDir, 'data', 'aggregation.csv');
+    const errorFile = path.join(propsFile, '..', 'error.out');
+    const logFile = path.join(propsFile, '..', 'log.out');
+    const resultFile = path.join(propsFile, '..', 'result.csv');
+    const cmd = 'cd ' + runDir + ' && ./runBenchmark.sh ' + propsFile;
     try {
-        const { stdout, stderr } = await exec('ls | grep js');
-        console.log('stdout:', stdout);
-        console.log('stderr:', stderr);
+        const { stdout, stderr } = await exec(cmd)
+        if (stderr) {
+            fs.writeFileSync(errorFile, stderr);
+        } else {
+            const mvResult = 'mv ' + resultCSV + ' ' + resultFile;
+            exec(mvResult, (error) => {
+                if (error) {
+                    console.error('mv error: ' + error);
+                }
+            });
+        }
+        fs.writeFileSync(logFile, stdout);
+        return {stdout, stderr};
     } catch (err) {
-        console.error(err);
-    };
+        fs.writeFileSync(errorFile, err);
+        return err;
+    }
 };
 
 /* POST properties. */
-router.post('/', function (req, res, next) {
+router.post('/', function (req, res) {
+    // create specific working directory for each task
     let dirPath = path.resolve(__dirname, '..');
     let curDate = new Date();
     let curPath = path.join(dirPath, 'public', 'histories', curDate.toISOString());
     if (!fs.existsSync(curPath)) {
         fs.mkdirSync(curPath, { recursive: true });
     } else {
-        res.status(500).send('Directory Already Exists');
+        res.status(500).send('task already exists');
+        return;
     }
 
+    // complete properties and write down to properties file
     let propsFile = path.join(curPath, "run.properties");
-    let properties = Object.entries(req.body).map(x => x.join("=")).join("\n");
+    let propsObj = req.body
+    const resultDir = path.join('results', propsObj['db'], curDate.toISOString());
+    propsObj['resultDirectory'] = resultDir;
+    propsObj['terminalRange'] = propsObj['leftRange'] + ',' + propsObj['rightRange'];
+    propsObj['transactions'] = propsObj['newOrder'] + ',' + propsObj['payment'] + ',' + propsObj['orderStatus'] + ',' + propsObj['delivery'] + ',' + propsObj['stockLevel'] + ',' + propsObj['updateItem'] + ',' + propsObj['updateStock'] + ',' + propsObj['globalDeadlock'] + ',' + propsObj['globalSnapshot'];
+    propsObj['terminalRange'] = '1,' + propsObj['warehouses'];
+    let properties = Object.entries(propsObj)
+                           .map(x => x.join("="))
+                           .join("\n");
     fs.writeFileSync(propsFile, properties, err => {
         if (err) {
-            res.status(500).send('Fail To Write Down Properties File');
+            res.status(500).send('fail to write down properties file');
+            return;
         }
     })
-    enqueue(lsWithGrep);
-    console.log(properties);
-    res.send('ok');
+
+    // push task in message queue
+    enqueue(runBenchmark(propsFile, resultDir));
+    res.send('enqueue task');
 });
 
 module.exports = router;

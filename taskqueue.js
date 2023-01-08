@@ -2,8 +2,14 @@ const Queue = require('queue-promise');
 
 const queue = new Queue({
     concurrent: 1,
-    interval: 10000,
+    interval: 60000,
     start: true
 })
 
-module.exports = function (someAsyncTask) { queue.enqueue(someAsyncTask) }
+module.exports = {
+    enqueue: function (someAsyncTask) {
+        queue.enqueue(() => {
+            return someAsyncTask;
+        })
+    }
+};

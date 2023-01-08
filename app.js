@@ -7,6 +7,9 @@ const logger = require('morgan');
 const propertiesRouter = require('./routes/properties');
 const resultRouter = require('./routes/result');
 const historyRouter = require('./routes/history');
+const configurationRouter = require('./routes/configuration');
+const logRouter = require('./routes/log');
+
 
 const app = express();
 
@@ -23,9 +26,10 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.use('/properties', propertiesRouter);
 app.use('/history', historyRouter);
 app.use('/result', resultRouter);
+app.use('/configuration', configurationRouter);
+app.use('/log', logRouter);
 
 app.disable('etag');
-
 
 // catch 404 and forward to error handler
 app.use(function (_req, _res, next) {

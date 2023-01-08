@@ -1,47 +1,56 @@
 const express = require('express');
 const path = require('path');
-const { parse } = require('csv-parse');
 const fs = require('fs');
+const csv = require('csv-parser');
 const router = express.Router();
 
 /* GET result. */
 router.get('/', function (req, res) {
-  const resCSV = path.join(__dirname, '..', 'public', 'histories', req.query.runid, 'result.csv');
-  if (!fs.existsSync(resCSV)) {
-    res.status(500).send('The Task Is Running');
-    return;
-  }
-  const groupBy = (objectArray, property) => {
-    return objectArray.reduce((acc, obj) => {
-      const key = obj[property];
-      if (!acc[key]) {
-        acc[key] = [];
-      }
-      // Add object to list for given key's value
-      acc[key].push(obj);
-      return acc;
-    }, {});
-  }
+    const configFile = path.join(__dirname, '..', 'public', 'histories', req.query.runid, 'run.properties');
+    if (!fs.existsSync(configFile)) {
+        res.status(500).send('can not find the configuration file');
+        return;
+    }
 
-  let resultline = new Array();
-  let linecnt = 0;
-  fs.createReadStream(resCSV)
-    .pipe(parse({ delimiter: ",", from_line: 2 }))
-    .on("data", function (row) {
-      (row[5] === '0') && (row[6] === '0')
-        && (resultline.push({
-          elapsed: Math.floor(parseInt(row[1]) / 1000) + 1,
-          latency: parseInt(row[2]),
-          type: row[4]
-        }))
-        && (linecnt += 1)
-    })
-    .on("end", function () {
-      res.send({
-        group: groupBy(resultline, 'elapsed'),
-        line: linecnt
-      });
-    })
+    const kvmap = Object.fromEntries(
+        fs.readFileSync(configFile, 'utf-8')
+            .split("\n")
+            .map((line) => [line.split("=")[0], line.split("=")[1]])
+    );
+
+    const resultCSV = path.join(__dirname, '..', 'public', 'histories', req.query.runid, 'result.csv');
+    if (!fs.existsSync(resultCSV)) {
+        res.status(500).send('the task has not finished');
+        return;
+    }
+
+    const groupBy = (objects, keys) => {
+        const groups = {};
+        keys.forEach((key) => {
+            groups[key] = [];
+            objects.forEach((object) => groups[key].push(object[key]))
+        })
+        return groups;
+    }
+
+    let columns;
+    fs.createReadStream(resultCSV)
+        .pipe(csv())
+        .on('headers', (headers) => {
+            columns = headers;
+        })
+
+    const results = [];
+    fs.createReadStream(resultCSV)
+        .pipe(csv())
+        .on('data', (data) => results.push(data))
+        .on('end', () => {
+            res.send({
+                results: groupBy(results, columns),
+                txnType: ['NEW_ORDER', 'PAYMENT', 'ORDER_STATUS', 'DELIVERY', 'STOCK_LEVEL', 'UPDATE_ITEM', 'UPDATE_STOCK', 'GLOBAL_DEADLOCK', 'GLOBAL_SNAPSHOT'],
+                des: kvmap.description
+            });
+        })
 });
 
 module.exports = router;
